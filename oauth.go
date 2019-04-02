@@ -3,8 +3,8 @@ package main
 import (
   "fmt"
   "os"
-  "log"
   "time"
+  "bytes"
   "net/http"
   "crypto/rand"
   "encoding/base64"
@@ -23,14 +23,10 @@ var oauthConf = &oauth2.Config{
   },
 }
 
-type CallbackRequest struct {
-  Code  string `form:"code"`
-  State string `form:"state"`
-}
-
 func init() {
   if err := godotenv.Load(); err != nil {
-    log.Print("No .env file found")
+    fmt.Errorf("No .env file found: %s", err.Error())
+    return
   }
 }
 
@@ -63,10 +59,23 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func callbackHandler(w http.ResponseWriter, r *http.Request) {
-  code, ok := r.URL.Query()["code"]
-  if !ok || len(code[0]) < 1 {
-    log.Println("Url Param 'code' is missing")
+  code_query, ok := r.URL.Query()["code"]
+  code := code_query[0]
+  if !ok || len(code) < 1 {
+    fmt.Errorf("Url Param 'code' is missing")
     return
   }
-  fmt.Fprintln(w, "Url Param 'code' is: " + string(code[0]))
+
+  token, err := oauthConf.Exchange(oauth2.NoContext, code)
+  if err != nil {
+    fmt.Errorf("code exchange failed: %s", err.Error())
+  }
+  fmt.Fprintf(w, "code is: %s\ntoken is: %+v\n", string(code), token)
+  var buf bytes.Buffer
+  resp, err := http.Post("http://pavlok-mvp.herokuapp.com/api/v1/stimuli/vibration/255", code, &buf)
+  if err != nil {
+    fmt.Errorf("failed post: %s", err.Error())
+    return
+  }
+  fmt.Println(resp.Body.Close())
 }
