@@ -6,6 +6,7 @@ import (
   "time"
   "bytes"
   "net/http"
+  "net/http/httputil"
   "crypto/rand"
   "encoding/base64"
   "golang.org/x/oauth2"
@@ -13,21 +14,30 @@ import (
   "github.com/gorilla/mux"
 )
 
-var oauthConf = &oauth2.Config{
-  RedirectURL: "https://zap.leojojo.me/oauth2/callback",
-  ClientID: os.Getenv("CLIENT_ID"),
-  ClientSecret: os.Getenv("SECRET_KEY"),
-  Scopes: []string{
-    "https://pavlok-mvp.herokuapp.com/oauth/",
-    "https://pavlok-mvp.herokuapp.com/api/",
-  },
-}
+var pavlok = newConfig()
 
-func init() {
-  if err := godotenv.Load(); err != nil {
-    fmt.Errorf("No .env file found: %s", err.Error())
-    return
+func newConfig() *oauth2.Config {
+  err := godotenv.Load()
+  if err != nil {
+    fmt.Errorf("Cannot load .env: %s", err);
+    os.Exit(1)
   }
+  client_id, exists := os.LookupEnv("CLIENT_ID")
+  secret_key, exists := os.LookupEnv("SECRET_KEY")
+  if !exists {
+    fmt.Errorf("Cannot find CLIENT_ID and SECRET_KEY in .env")
+    os.Exit(1)
+  }
+  c := &oauth2.Config{
+    RedirectURL: "https://zap.leojojo.me/oauth2/callback",
+    ClientID: client_id,
+    ClientSecret: secret_key,
+    Endpoint: oauth2.Endpoint{
+      AuthURL: "http://pavlok-mvp.herokuapp.com/oauth/authorize",
+      TokenURL: "http://pavlok-mvp.herokuapp.com/oauth/token",
+    },
+  }
+  return c
 }
 
 func main() {
@@ -54,7 +64,7 @@ func generateStateOauthCookie(w http.ResponseWriter) string {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
   oauthState := generateStateOauthCookie(w)
-  u := oauthConf.AuthCodeURL(oauthState)
+  u := pavlok.AuthCodeURL(oauthState)
   http.Redirect(w, r, u, http.StatusTemporaryRedirect)
 }
 
@@ -66,16 +76,22 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  token, err := oauthConf.Exchange(oauth2.NoContext, code)
+  token, err := pavlok.Exchange(oauth2.NoContext, code)
   if err != nil {
     fmt.Errorf("code exchange failed: %s", err.Error())
+    return
   }
-  fmt.Fprintf(w, "code is: %s\ntoken is: %+v\n", string(code), token)
+  fmt.Fprintf(w, "code is: %s\ntoken is: %s\n", string(code), string(token.AccessToken))
   var buf bytes.Buffer
   resp, err := http.Post("http://pavlok-mvp.herokuapp.com/api/v1/stimuli/vibration/255", code, &buf)
   if err != nil {
     fmt.Errorf("failed post: %s", err.Error())
     return
   }
-  fmt.Println(resp.Body.Close())
+  dumpResp, err := httputil.DumpResponse(resp, true)
+  if err != nil {
+    fmt.Errorf("failed post: %s", err.Error())
+    return
+  }
+  fmt.Printf("%s", dumpResp)
 }
